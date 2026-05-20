@@ -3,16 +3,46 @@ import pandas as pd
 import os
 
 # 1. File Paths and Output Configuration
-BASE_DIR = r"D:\project-healthyageing\02_data\00_rawdata\chbmp_rs_ec"
-OUTPUT_FILE = "CHBMP_Metadata_Summary_First10.xlsx"
+BASE_DIR = r"D:\project-healthyageing\02_data\00_download\chbmp\rs"
+PARTICIPANTS_FILE = r"D:\project-healthyageing\02_data\00_download\chbmp\participants.tsv"
+OUTPUT_FILE = "CHBMP_Metadata_Summary_Complete_First10.xlsx"
 
-# 2. Find All FIF Files Directly in the folder
-# Scans the directory and creates a list of all files ending with '.fif'
-fif_files = [f for f in os.listdir(BASE_DIR) if f.endswith('.fif')]
+# 2. Load Global Demographic and Clinical Data from participants.tsv
+demographics = {}
 
+if os.path.exists(PARTICIPANTS_FILE):
+    print("Loading demographic and clinical data from participants.tsv...")
+    try:
+        df_parts = pd.read_csv(PARTICIPANTS_FILE, sep='\t')
+        # Normalize column names to lowercase for safe and flexible matching
+        df_parts.columns = [str(c).lower() for c in df_parts.columns]
+        
+        for _, row in df_parts.iterrows():
+            p_id = str(row['participant_id']).strip() if 'participant_id' in df_parts.columns else ""
+            if p_id:
+                # Ensure the subject ID consistency (matches 'sub-CBMXXXXX' format)
+                if not p_id.startswith('sub-'):
+                    p_id = f"sub-{p_id}"
+                
+                # Cache all available clinical metrics mentioned by Gesine
+                demographics[p_id.lower()] = {
+                    'age': row.get('age', 'N/A'),
+                    'sex': row.get('sex', 'N/A'),
+                    'mmse': row.get('mmse', 'N/A'),
+                    'wais_iii': row.get('wais_iii', row.get('wais', 'N/A'))
+                }
+        print(f"Successfully cached metadata for {len(demographics)} participants.")
+    except Exception as e:
+        print(f"Warning: Failed to parse participants.tsv: {e}")
+else:
+    print("WARNING: participants.tsv not found! Demographic columns will default to N/A.")
+
+# 3. Find All FIF Files Directly in the folder
+# Wrapped the list comprehension in sorted() to guarantee alphabetical processing
+fif_files = sorted([f for f in os.listdir(BASE_DIR) if f.endswith('.fif')])
 metadata_list = []
 
-print(f"Found {len(fif_files)} FIF files. Starting metadata extraction...")
+print(f"\nFound {len(fif_files)} FIF files. Starting metadata extraction for the first 10...")
 
 for file_name in fif_files:
     try:
@@ -27,48 +57,50 @@ for file_name in fif_files:
         raw = mne.io.read_raw_fif(file_path, preload=False, verbose=False)
         info = raw.info
         
-        # --- 1. Technical Details ---
+        # --- Technical Details ---
         sfreq = info['sfreq']
-        n_channels = len(raw.ch_names)
         
-        # --- 2. Demographic Data (with Safety Net) ---
-        subject_info = info.get('subject_info')
-        
-        # CRITICAL FIX: If 'subject_info' is entirely missing (None), fallback to an empty dictionary
-        # This prevents the "'NoneType' object has no attribute 'get'" error.
-        if subject_info is None:
-            subject_info = {}
+        # Channel Names & "Status" Exclusion
+        ch_names = raw.ch_names
+        if "Status" in ch_names:
+            ch_names.remove("Status")
             
-        # Extract Sex Details (0: Unknown, 1: Male, 2: Female)
-        sex_code = subject_info.get('sex', 0)
-        sex_str = str(sex_code)
+        n_channels = len(ch_names)
+        ch_names_str = ", ".join(ch_names)
         
-        # Calculate Age based on measurement date and birthday
-        age = "N/A"
-        birthday = subject_info.get('birthday', None)
-        meas_date = info.get('meas_date', None)
+        # Band-pass Filter Settings
+        highpass = info.get('highpass', 'N/A')
+        lowpass = info.get('lowpass', 'N/A')
         
-        if birthday is not None and meas_date is not None:
-            # MNE stores birthday as a tuple (year, month, day) or as a string 'YYYY-MM-DD'
-            birth_year = birthday[0] if isinstance(birthday, tuple) else int(str(birthday).split('-')[0])
-            meas_year = meas_date.year
-            age = meas_year - birth_year
+        # File Length & Samples
+        n_samples = raw.n_times
+        length_sec = n_samples / sfreq if sfreq else 'N/A'
+        
+        # --- Match Demographic and Clinical Data from Cache ---
+        sub_demo = demographics.get(sub_id.lower(), {'age': 'N/A', 'sex': 'N/A', 'mmse': 'N/A', 'wais_iii': 'N/A'})
         
         # Append the successfully extracted metadata to our list
         metadata_list.append({
             "Subject_ID": sub_id,
             "File_Name": file_name,
-            "Sex": sex_str,
-            "Age": age,
+            "Sex": sub_demo['sex'],
+            "Age": sub_demo['age'],
+            "MMSE": sub_demo['mmse'],
+            "WAIS_III": sub_demo['wais_iii'],
             "Electrode_Set_Channels": n_channels,
-            "Sampling_Freq_Hz": sfreq
+            "Channel_Names": ch_names_str,
+            "Sampling_Freq_Hz": sfreq,
+            "Total_Samples": n_samples,
+            "File_Length_sec": round(length_sec, 2) if isinstance(length_sec, float) else length_sec,
+            "Highpass_Hz": highpass,
+            "Lowpass_Hz": lowpass
         })
         
         # --- 3. Stop Condition ---
         # Stop the extraction loop once we have exactly 10 successful records
-        #if len(metadata_list) == 10:
-        #    print("\nSuccessfully processed 10 files. Stopping extraction.")
-         #   break
+        if len(metadata_list) == 10:
+            print("\nSuccessfully processed 10 files. Stopping extraction.")
+            break
             
     except Exception as e:
         print(f"Error processing {file_name}: {e}")
@@ -77,6 +109,6 @@ for file_name in fif_files:
 if metadata_list:
     df = pd.DataFrame(metadata_list)
     df.to_excel(OUTPUT_FILE, index=False)
-    print(f"\nSuccess! Clean metadata exported to: {os.path.abspath(OUTPUT_FILE)}")
+    print(f"\nSuccess! Complete metadata exported to: {os.path.abspath(OUTPUT_FILE)}")
 else:
     print("\nNo metadata could be extracted. Please check the files and directory path.")

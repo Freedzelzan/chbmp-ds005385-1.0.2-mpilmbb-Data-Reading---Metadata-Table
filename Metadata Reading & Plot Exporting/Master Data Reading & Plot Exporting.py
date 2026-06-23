@@ -3,14 +3,12 @@ import pandas as pd
 import os
 import glob
 import warnings
-import plotly.graph_objects as go  # Matplotlib yerine Plotly kullanıyoruz
+import plotly.graph_objects as go 
 
 # Hide MNE and Pandas warnings to keep the terminal clean
 warnings.filterwarnings('ignore')
 
-# ==============================================================================
 # 1. DIRECTORY CONFIGURATIONS & OUTPUT FILE
-# ==============================================================================
 BASE_DIR_CHBMP = r"D:\project-healthyageing\02_data\00_download\chbmp"
 BASE_DIR_DORT = r"D:\project-healthyageing\02_data\00_download\ds005385-1.0.2"
 BASE_DIR_MPI = r"D:\project-healthyageing\02_data\00_download\mpilmbb\preprocessed"
@@ -22,9 +20,7 @@ DEMO_MPI = r"D:\project-healthyageing\02_data\00_download\mpilmbb\META_File_IDs_
 
 OUTPUT_FILE = "Master_Metadata_Summary.xlsx"
 
-# ==============================================================================
 # PLOTTING CONFIGURATION
-# ==============================================================================
 # Options: 
 # 'show' -> Opens interactive graphs in browser immediately (halts script)
 # 'save' -> Saves interactive HTML files in the background without halting
@@ -44,9 +40,7 @@ SEPARATOR_ROW = {
     "Total_Channels": "", "Sampling_Rate": "", "BandPass_Filter": "", "Discontinuity_Status": ""
 }
 
-# ==============================================================================
 # 2. DEMOGRAPHICS LOADING (Strict Matching Logic)
-# ==============================================================================
 demo_dict = {'chbmp': {}, 'dortmund': {}, 'mpi': {}}
 
 print("Loading demographic databases...")
@@ -117,9 +111,7 @@ def get_bandpass_str(info):
         return f"{hp} - {lp} Hz"
     return "N/A"
 
-# ==============================================================================
 # 3. PROCESSING DATABASE 1: CUBAN (CHBMP) WITH INTERACTIVE PLOTTING
-# ==============================================================================
 print("\n--- Processing CHBMP (Cuban) Database ---")
 if os.path.exists(BASE_DIR_CHBMP):
     chbmp_edf_files = sorted(glob.glob(os.path.join(BASE_DIR_CHBMP, "**", "*_eeg.edf"), recursive=True))
@@ -223,13 +215,13 @@ if os.path.exists(BASE_DIR_CHBMP):
                             opacity=0.8
                         ))
 
-                    # Add Discontinuities (Red Dashed Lines)
+                    # Add Discontinuities
                     for idx, t_disc in enumerate(discontinuities):
                         if t_start <= t_disc <= t_end:
                             fig.add_vline(x=t_disc, line_width=2, line_dash="dash", line_color="red",
                                           annotation_text="Discontinuity" if idx==0 else "", annotation_position="top right")
                     
-                    # Add Valid Segments (Gray Shaded Areas)
+                    # Add Valid Segments
                     for idx, seg in enumerate(segments):
                         t_on = seg['onset']
                         t_off = seg['onset'] + seg['duration']
@@ -274,9 +266,7 @@ if os.path.exists(BASE_DIR_CHBMP):
     if count_chbmp > 0:
         master_metadata.append(SEPARATOR_ROW)
 
-# ==============================================================================
 # 4. PROCESSING DATABASE 2: DORTMUND (ds005385)
-# ==============================================================================
 print("\n--- Processing Dortmund (ds005385) Database ---")
 if os.path.exists(BASE_DIR_DORT):
     dort_files = sorted(glob.glob(os.path.join(BASE_DIR_DORT, "**", "*EyesClosed*.edf"), recursive=True))
@@ -316,9 +306,7 @@ if os.path.exists(BASE_DIR_DORT):
     if count_dort > 0:
         master_metadata.append(SEPARATOR_ROW)
 
-# ==============================================================================
 # 5. PROCESSING DATABASE 3: LEIPZIG (MPILMBB / LEMON)
-# ==============================================================================
 print("\n--- Processing Leipzig (MPILMBB) Database ---")
 if os.path.exists(BASE_DIR_MPI):
     mpi_files = sorted(glob.glob(os.path.join(BASE_DIR_MPI, "**", "*_EC.set"), recursive=True))
@@ -353,9 +341,7 @@ if os.path.exists(BASE_DIR_MPI):
         except Exception as e:
             print(f"Error processing Leipzig {file_name}: {e}")
 
-# ==============================================================================
 # 6. EXPORTING MASTER EXCEL FILE WITH STYLING
-# ==============================================================================
 if master_metadata:
     df = pd.DataFrame(master_metadata)
     

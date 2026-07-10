@@ -1,12 +1,12 @@
-.venv
-uv.lock
-*.egg-info
+#.venv
+#uv.lock
+#*.egg-info
 
 02_data
-04_results
+#04_results
 
-__pycache__/
-*.pyc
+#__pycache__/
+#*.pyc
 *.fif
 
-.gitignore
+#.gitignore

@@ -1,0 +1,9 @@
+.venv
+uv.lock
+*.egg-info
+
+02_data
+
+__pycache__/
+*.pyc
+*.fif

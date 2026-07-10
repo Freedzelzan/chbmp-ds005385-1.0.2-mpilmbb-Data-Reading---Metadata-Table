@@ -3,7 +3,10 @@ uv.lock
 *.egg-info
 
 02_data
+04_results
 
 __pycache__/
 *.pyc
 *.fif
+
+.gitignore

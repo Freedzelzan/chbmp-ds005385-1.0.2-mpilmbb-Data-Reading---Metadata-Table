@@ -15,9 +15,23 @@ DIR_PROJ = Path.cwd().parent
 # insert the raw_data under DIR_RAWDATA
 DIR_DATA = define_dir(DIR_PROJ, "02_data")
 
+# Define subdirectories under DIR_DATA
 DIR_DOWNLOAD = define_dir(DIR_DATA, "00_download")
-DIR_RAWDATA = define_dir(DIR_DATA, "00_rawdata")
+
+# Downloaded Data Directories
+BASE_DIR_CHBMP = DIR_DOWNLOAD / "chbmp"
+BASE_DIR_DORT = DIR_DOWNLOAD / "ds005385-1.0.2"
+BASE_DIR_MPI = DIR_DOWNLOAD / "mpilmbb" / "preprocessed"
+
+# Updated Demographic File Paths
+DEMO_CHBMP = DIR_DOWNLOAD / "chbmp" / "chbmp_Demographic_data.csv"
+DEMO_DORT = DIR_DOWNLOAD / "ds005385-1.0.2" / "ds005385_participants.tsv"
+DEMO_MPI = DIR_DOWNLOAD / "mpilmbb" / "META_File_IDs_Age_Gender_Education_Drug_Smoke_SKID_LEMON.csv"
+
+# Define additional subdirectories under DIR_DATA
 DIR_PREPDATA = define_dir(DIR_DATA, "01_prepdata")
 DIR_METADATA = define_dir(DIR_DATA, "02_metadata")
 
+# Define the path for the '03_analysis' directory
 DIR_SCRIPTS = define_dir(DIR_PROJ, "03_analysis")
+DIR_RESULTS = define_dir(DIR_PROJ, "04_results")

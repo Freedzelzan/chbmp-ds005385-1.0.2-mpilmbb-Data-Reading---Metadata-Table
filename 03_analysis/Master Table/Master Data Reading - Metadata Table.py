@@ -10,7 +10,7 @@ warnings.filterwarnings('ignore')
 # ==============================================================================
 # 1. DIRECTORY CONFIGURATIONS & OUTPUT FILE
 # ==============================================================================
-from config import BASE_DIR_CHBMP, BASE_DIR_DORT, BASE_DIR_MPI, DEMO_CHBMP, DEMO_DORT, DEMO_MPI, DIR_RESULTS
+from src.config import BASE_DIR_CHBMP, BASE_DIR_DORT, BASE_DIR_MPI, DEMO_CHBMP, DEMO_DORT, DEMO_MPI, DIR_RESULTS
 
 OUTPUT_FILE = DIR_RESULTS / "Master_Metadata_Summary.xlsx"
 master_metadata = []

@@ -1,9 +1,0 @@
-README.md
-pyproject.toml
-./src/__init__.py
-./src/config.py
-chbmp_ds005385_1_0_2_mpilmbb_data_reading_metadata_table.egg-info/PKG-INFO
-chbmp_ds005385_1_0_2_mpilmbb_data_reading_metadata_table.egg-info/SOURCES.txt
-chbmp_ds005385_1_0_2_mpilmbb_data_reading_metadata_table.egg-info/dependency_links.txt
-chbmp_ds005385_1_0_2_mpilmbb_data_reading_metadata_table.egg-info/requires.txt
-chbmp_ds005385_1_0_2_mpilmbb_data_reading_metadata_table.egg-info/top_level.txt

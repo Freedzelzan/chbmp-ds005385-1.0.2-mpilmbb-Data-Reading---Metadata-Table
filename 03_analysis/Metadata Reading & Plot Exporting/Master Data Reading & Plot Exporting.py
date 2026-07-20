@@ -10,13 +10,13 @@ warnings.filterwarnings('ignore')
 # ==============================================================================
 # 1. DIRECTORY CONFIGURATIONS & PARAMETERS
 # ==============================================================================
-BASE_DIR_CHBMP = r"D:\project-healthyageing\02_data\00_download\chbmp"
-BASE_DIR_DORT = r"D:\project-healthyageing\02_data\00_download\ds005385-1.0.2"
-BASE_DIR_MPI = r"D:\project-healthyageing\02_data\00_download\mpilmbb\preprocessed"
+BASE_DIR_CHBMP = r"E:\project-healthyageing\02_data\00_download\chbmp"
+BASE_DIR_DORT = r"E:\project-healthyageing\02_data\00_download\ds005385-1.0.2"
+BASE_DIR_MPI = r"E:\project-healthyageing\02_data\00_download\mpilmbb\preprocessed"
 
-DEMO_CHBMP = r"D:\project-healthyageing\02_data\00_download\chbmp\chbmp_Demographic_data.csv"
-DEMO_DORT = r"D:\project-healthyageing\02_data\00_download\ds005385-1.0.2\ds005385_participants.tsv"
-DEMO_MPI = r"D:\project-healthyageing\02_data\00_download\mpilmbb\META_File_IDs_Age_Gender_Education_Drug_Smoke_SKID_LEMON.csv"
+DEMO_CHBMP = r"E:\project-healthyageing\02_data\00_download\chbmp\chbmp_Demographic_data.csv"
+DEMO_DORT = r"E:\project-healthyageing\02_data\00_download\ds005385-1.0.2\ds005385_participants.tsv"
+DEMO_MPI = r"E:\project-healthyageing\02_data\00_download\mpilmbb\META_File_IDs_Age_Gender_Education_Drug_Smoke_SKID_LEMON.csv"
 
 OUTPUT_FILE = "Master_Metadata_Summary.xlsx"
 

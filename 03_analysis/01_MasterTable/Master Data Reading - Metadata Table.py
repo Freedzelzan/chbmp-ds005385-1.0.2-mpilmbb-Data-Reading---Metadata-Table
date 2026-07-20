@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import glob
 import warnings
+from pathlib import Path
 
 # hiding MNE and Pandas warnings
 warnings.filterwarnings('ignore')
@@ -10,9 +11,16 @@ warnings.filterwarnings('ignore')
 # ==============================================================================
 # 1. DIRECTORY CONFIGURATIONS & OUTPUT FILE
 # ==============================================================================
-from src.config import BASE_DIR_CHBMP, BASE_DIR_DORT, BASE_DIR_MPI, DEMO_CHBMP, DEMO_DORT, DEMO_MPI, DIR_RESULTS
+#from src.config import BASE_DIR_CHBMP, BASE_DIR_DORT, BASE_DIR_MPI, DEMO_CHBMP, DEMO_DORT, DEMO_MPI, DIR_RESULTS
+BASE_DIR_CHBMP = r"E:\project-healthyageing\02_data\00_download\chbmp"
+BASE_DIR_DORT = r"E:\project-healthyageing\02_data\00_download\ds005385-1.0.2"
+BASE_DIR_MPI = r"E:\project-healthyageing\02_data\00_download\mpilmbb\preprocessed"
 
-OUTPUT_FILE = DIR_RESULTS / "Master_Metadata_Summary.xlsx"
+DEMO_CHBMP = r"E:\project-healthyageing\02_data\00_download\chbmp\chbmp_Demographic_data.csv"
+DEMO_DORT = r"E:\project-healthyageing\02_data\00_download\ds005385-1.0.2\ds005385_participants.tsv"
+DEMO_MPI = r"E:\project-healthyageing\02_data\00_download\mpilmbb\META_File_IDs_Age_Gender_Education_Drug_Smoke_SKID_LEMON.csv"
+
+OUTPUT_FILE = "Master_Metadata_Summary.xlsx"
 master_metadata = []
 
 # Empty row template for the blue separator
@@ -272,17 +280,19 @@ if os.path.exists(BASE_DIR_MPI):
 # ==============================================================================
 if master_metadata:
     df = pd.DataFrame(master_metadata)
-    
+
     columns_order = [
-        "Database_Name", "Subject_ID", "Gender", "Age", "Segment_ID", 
-        "Condition", "Onset_sec", "Duration_sec", "Total_Channels", 
+        "Database_Name", "Subject_ID", "Gender", "Age", "Segment_ID",
+        "Condition", "Onset_sec", "Duration_sec", "Total_Channels",
         "Sampling_Rate", "BandPass_Filter", "Discontinuity_Status"
     ]
     df = df[columns_order]
-    
+
+    output_csv = Path(OUTPUT_FILE).with_suffix('.csv')
+
     try:
-        pd.DataFrame.to_csv(df, sep=',', index=False, path_or_buf=OUTPUT_FILE.with_suffix('.csv'))
-        print(f"\nRaw CSV exported to: {OUTPUT_FILE.with_suffix('.csv')}")
+        df.to_csv(output_csv, sep=',', index=False)
+        print(f"\nRaw CSV exported to: {output_csv}")
     except Exception as e:
         print(f"Error exporting CSV: {e}")
 else:

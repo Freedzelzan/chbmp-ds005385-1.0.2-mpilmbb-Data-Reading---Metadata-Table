@@ -9,7 +9,7 @@ def define_dir(root, *names):
     return path
 
 # Get the current directory where the script is executed
-DIR_PROJ = Path.cwd().parent
+DIR_PROJ = Path(__file__).parent.parent
 
 # Define the paths for 'logs' and 'results' directories
 # insert the raw_data under DIR_RAWDATA
@@ -19,14 +19,14 @@ DIR_DATA = define_dir(DIR_PROJ, "02_data")
 DIR_DOWNLOAD = define_dir(DIR_DATA, "00_download")
 
 # Downloaded Data Directories
-BASE_DIR_CHBMP = DIR_DOWNLOAD / "chbmp"
-BASE_DIR_DORT = DIR_DOWNLOAD / "ds005385-1.0.2"
-BASE_DIR_MPI = DIR_DOWNLOAD / "mpilmbb" / "preprocessed"
+BASE_DIR_CHBMP = DIR_DOWNLOAD.joinpath("chbmp")
+BASE_DIR_DORT = DIR_DOWNLOAD.joinpath("ds005385-1.0.2")
+BASE_DIR_MPI = DIR_DOWNLOAD.joinpath("mpilmbb") / "preprocessed"
 
 # Updated Demographic File Paths
-DEMO_CHBMP = DIR_DOWNLOAD / "chbmp" / "chbmp_Demographic_data.csv"
-DEMO_DORT = DIR_DOWNLOAD / "ds005385-1.0.2" / "ds005385_participants.tsv"
-DEMO_MPI = DIR_DOWNLOAD / "mpilmbb" / "META_File_IDs_Age_Gender_Education_Drug_Smoke_SKID_LEMON.csv"
+DEMO_CHBMP = DIR_DOWNLOAD.joinpath("chbmp").joinpath("chbmp_Demographic_data.csv")
+DEMO_DORT = DIR_DOWNLOAD.joinpath("ds005385-1.0.2").joinpath("ds005385_participants.tsv")
+DEMO_MPI = DIR_DOWNLOAD.joinpath("mpilmbb").joinpath("META_File_IDs_Age_Gender_Education_Drug_Smoke_SKID_LEMON.csv")
 
 # Define additional subdirectories under DIR_DATA
 DIR_PREPDATA = define_dir(DIR_DATA, "01_prepdata")

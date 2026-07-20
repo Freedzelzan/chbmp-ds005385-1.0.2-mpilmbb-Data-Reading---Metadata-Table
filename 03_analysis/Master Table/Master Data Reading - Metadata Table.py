@@ -281,20 +281,10 @@ if master_metadata:
     ]
     df = df[columns_order]
     
-    def highlight_separator(row):
-        if row['Database_Name'] == '---':
-            return ['background-color: #0070C0; color: #0070C0'] * len(row)
-        return [''] * len(row)
-    
     try:
-        styled_df = df.style.apply(highlight_separator, axis=1)
-        styled_df.to_excel(OUTPUT_FILE, index=False, engine='openpyxl')
-        print("\n" + "="*60)
-        print(f"SUCCESS! Master Metadata extracted to:")
-        print(f"{os.path.abspath(OUTPUT_FILE)}")
-        print("="*60 + "\n")
+        pd.DataFrame.to_csv(df, sep=',', index=False, path_or_buf=OUTPUT_FILE.with_suffix('.csv'))
+        print(f"\nRaw CSV exported to: {OUTPUT_FILE.with_suffix('.csv')}")
     except Exception as e:
-        print(f"\nStyling export failed. Saving raw format: {e}")
-        df.to_excel(OUTPUT_FILE, index=False)
+        print(f"Error exporting CSV: {e}")
 else:
     print("\nNo metadata could be extracted. Please check the paths.")

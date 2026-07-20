@@ -4,7 +4,7 @@ import os
 import glob
 import warnings
 
-# MNE ve Pandas uyarılarını terminali kirletmemesi için gizliyoruz
+# hiding MNE and Pandas warnings
 warnings.filterwarnings('ignore')
 
 # ==============================================================================
@@ -33,7 +33,7 @@ print("Loading demographic databases...")
 if os.path.exists(DEMO_CHBMP):
     try:
         df_chbmp = pd.read_csv(DEMO_CHBMP, skiprows=1)
-        df_chbmp = df_chbmp.dropna(axis=1, how='all')
+        df_chbmp = df_chbmp.dropna(axis=1, how='all') #drop columns with NaN values
         df_chbmp.columns = [str(c).lower().strip() for c in df_chbmp.columns]
         
         for _, row in df_chbmp.iterrows():
@@ -41,7 +41,7 @@ if os.path.exists(DEMO_CHBMP):
             if not raw_id or raw_id == 'nan':
                 continue
             # If the ID doesn't start with 'sub-', we will add it for consistency (e.g., sub-001)
-            clean_id = raw_id.replace('sub-', '')
+            clean_id = raw_id.replace('sub-', '') ### what further information does this add? (Gesine)
             demo_dict['chbmp'][clean_id] = {
                 'age': str(row.get('age', 'N/A')).strip(),
                 'gender': str(row.get('gender', 'N/A')).strip()

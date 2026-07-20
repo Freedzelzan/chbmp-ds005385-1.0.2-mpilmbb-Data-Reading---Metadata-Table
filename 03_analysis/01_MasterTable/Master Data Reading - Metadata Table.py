@@ -42,6 +42,7 @@ if os.path.exists(DEMO_CHBMP):
                 continue
             # If the ID doesn't start with 'sub-', we will add it for consistency (e.g., sub-001)
             clean_id = raw_id.replace('sub-', '') ### what further information does this add? (Gesine)
+            # It removes the 'sub-' prefix to ensure the ID exactly matches the keys used later when reading the data folders. (Mert)
             demo_dict['chbmp'][clean_id] = {
                 'age': str(row.get('age', 'N/A')).strip(),
                 'gender': str(row.get('gender', 'N/A')).strip()
@@ -123,8 +124,6 @@ if os.path.exists(BASE_DIR_CHBMP):
 
             edf_file = edf_files[0]
             tsv_file = tsv_files[0]
-            
-            # BURASI DÜZELTİLDİ: _ karakterinden bölüp ilk kısmı alıyoruz (Örn: sub-CBM00001_ses-V01... -> sub-CBM00001)
             clean_id = sub_folder.split('_')[0].lower().replace('sub-', '').strip()
             demo = demo_dict['chbmp'].get(clean_id)
             

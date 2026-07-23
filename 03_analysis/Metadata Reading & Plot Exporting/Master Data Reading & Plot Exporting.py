@@ -108,7 +108,7 @@ def get_bandpass_str(info):
     return "N/A"
 
 # ==============================================================================
-# 3. PROCESSING DATABASE 1: CUBAN (CHBMP)
+# 3. PROCESSING DATABASE CUBAN (CHBMP)
 # ==============================================================================
 print("\n--- Processing CHBMP (Cuban) Database ---")
 if os.path.exists(BASE_DIR_CHBMP):
@@ -258,7 +258,7 @@ if os.path.exists(BASE_DIR_CHBMP):
             master_metadata.append(SEPARATOR_ROW)
 
 # ==============================================================================
-# 4. PROCESSING DATABASE 2: DORTMUND (DS005385)
+# 4. PROCESSING DATABASE DORTMUND (DS005385)
 # ==============================================================================
 print("\n--- Processing Dortmund (ds005385) Database ---")
 if os.path.exists(BASE_DIR_DORT):
@@ -310,7 +310,7 @@ if os.path.exists(BASE_DIR_DORT):
         master_metadata.append(SEPARATOR_ROW)
 
 # ==============================================================================
-# 5. PROCESSING DATABASE 3: LEIPZIG (MPI / LEMON)
+# 5. PROCESSING DATABASE LEIPZIG (MPI / LEMON)
 # ==============================================================================
 print("\n--- Processing Leipzig (MPILMBB) Database ---")
 if os.path.exists(BASE_DIR_MPI):
@@ -338,12 +338,12 @@ if os.path.exists(BASE_DIR_MPI):
             ch_names_str = f"[{', '.join(raw.ch_names)}]"
 
             # -------------------------------------------------------------
-            # BOUNDARY (KESİNTİ) KONTROLÜ - Çalışan MNE Olay (Event) Mantığı
+            # Boundary (discontinuity) events detection
             # -------------------------------------------------------------
             boundary_times = []
             try:
                 events, event_id = mne.events_from_annotations(raw, verbose=False)
-                # 'boundary' içeren etiketleri filtrele
+                # filter event_id keys to find those related to boundaries
                 boundary_keys = [key for key in event_id.keys() if 'boundary' in key.lower()]
                 
                 for b_key in boundary_keys:
@@ -355,12 +355,12 @@ if os.path.exists(BASE_DIR_MPI):
             except Exception:
                 pass 
 
-            # Zaman damgalarını küçükten büyüğe sırala
+            # sort the boundary times to ensure they are in chronological order
             boundary_times.sort()
             
             segments_list = []
 
-            # Eğer hiç kesinti (boundary) yoksa, tüm dosyayı tek parça olarak ekle
+            # Add segments based on boundary times
             if not boundary_times:
                 segments_list.append({
                     "onset": 0.0, 
@@ -371,7 +371,7 @@ if os.path.exists(BASE_DIR_MPI):
                 for b_time in boundary_times:
                     seg_duration = b_time - current_onset
                     
-                    # 0 saniyelik sahte segmentleri önlemek için kontrol
+                    # Only add segments with positive duration
                     if seg_duration > 0:
                         segments_list.append({
                             "onset": current_onset, 
@@ -379,14 +379,14 @@ if os.path.exists(BASE_DIR_MPI):
                         })
                     current_onset = b_time
                 
-                # Son kesinti noktasından dosyanın sonuna kadar olan kısmı ekle
+                # Add the final segment after the last boundary if it exists
                 if total_duration_sec - current_onset > 0:
                     segments_list.append({
                         "onset": current_onset, 
                         "duration": total_duration_sec - current_onset
                     })
 
-            # Toplanan segmentleri status ekleyerek master metadata'ya yaz
+            # write the segments to master metadata with appropriate status
             for i, seg in enumerate(segments_list):
                 if len(segments_list) == 1:
                     status = "Clean"
@@ -421,7 +421,6 @@ if os.path.exists(BASE_DIR_MPI):
 if master_metadata:
     df = pd.DataFrame(master_metadata)
 
-    # Channel_Names Discontinuity_Status'un hemen öncesinde (sağdan 2.)
     columns_order = [
         "Database_Name", "Subject_ID", "Gender", "Age", "Segment_ID",
         "Condition", "Onset_sec", "Duration_sec", "Total_Channels",

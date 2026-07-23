@@ -238,13 +238,15 @@ print("\n--- Processing Dortmund (ds005385) Database ---")
 if os.path.exists(BASE_DIR_DORT):
     dort_files = sorted(glob.glob(os.path.join(BASE_DIR_DORT, "**", "*EyesClosed*.edf"), recursive=True))
     count_dort = 0
+    dort_seg_counter = {}
 
     for file_path in dort_files:
         if count_dort >= 10:
             break
             
         file_name = os.path.basename(file_path)
-        sub_id = file_name.split('_')[0].lower()
+        raw_sub_id = file_name.split('_')[0]
+        sub_id = raw_sub_id.lower()
         if not sub_id.startswith('sub-'):
             sub_id = f"sub-{sub_id}"
             
@@ -257,16 +259,19 @@ if os.path.exists(BASE_DIR_DORT):
             raw = mne.io.read_raw_edf(file_path, preload=False, verbose=False)
             duration_sec = raw.n_times / raw.info['sfreq'] if raw.info['sfreq'] else 0
 
+            dort_seg_counter[raw_sub_id] = dort_seg_counter.get(raw_sub_id, 0) + 1
+            current_seg_id = f"seg_{dort_seg_counter[raw_sub_id]:02d}"
+
             master_metadata.append({
-                "Database_Name": "Dortmund", "Subject_ID": file_name.split('_')[0],
+                "Database_Name": "Dortmund", "Subject_ID": raw_sub_id,
                 "Gender": demo['gender'], "Age": demo['age'],
-                "Segment_ID": "seg_01", "Condition": "eyes closed",
+                "Segment_ID": current_seg_id, "Condition": "eyes closed",
                 "Onset_sec": 0.0, "Duration_sec": round(duration_sec, 2),
                 "Total_Channels": len(raw.ch_names), "Sampling_Rate": raw.info['sfreq'],
                 "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": "Clean" 
             })
             count_dort += 1
-            print(f"Processed Dortmund: {file_name}")
+            print(f"Processed Dortmund: {file_name} | Extracted {current_seg_id}")
         except Exception as e:
             print(f"Error processing Dortmund {file_name}: {e}")
 
@@ -286,7 +291,8 @@ if os.path.exists(BASE_DIR_MPI):
             break
             
         file_name = os.path.basename(file_path)
-        clean_id = file_name.split('_')[0].lower().replace('sub-', '').strip()
+        subject_id = file_name.split('_')[0]
+        clean_id = subject_id.lower().replace('sub-', '').strip()
         
         demo = demo_dict['mpi'].get(clean_id)
         if not demo:
@@ -295,18 +301,81 @@ if os.path.exists(BASE_DIR_MPI):
 
         try:
             raw = mne.io.read_raw_eeglab(file_path, preload=False, verbose=False)
-            duration_sec = raw.n_times / raw.info['sfreq'] if raw.info['sfreq'] else 0
+            sfreq = raw.info['sfreq']
+            total_duration_sec = raw.n_times / sfreq if sfreq else 0
 
-            master_metadata.append({
-                "Database_Name": "MPILMBB", "Subject_ID": file_name.split('_')[0],
-                "Gender": demo['gender'], "Age": demo['age'],
-                "Segment_ID": "seg_01", "Condition": "EC",
-                "Onset_sec": 0.0, "Duration_sec": round(duration_sec, 2),
-                "Total_Channels": len(raw.ch_names), "Sampling_Rate": raw.info['sfreq'],
-                "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": "Clean" 
-            })
+            # -------------------------------------------------------------
+            # BOUNDARY (DISCONTINUITY) CHECK
+            # -------------------------------------------------------------
+            boundary_times = []
+            try:
+                events, event_id = mne.events_from_annotations(raw, verbose=False)
+                # Filter keys that contain 'boundary' (case-insensitive)
+                boundary_keys = [key for key in event_id.keys() if 'boundary' in key.lower()]
+                
+                for b_key in boundary_keys:
+                    b_id = event_id[b_key]
+                    b_events = events[events[:, 2] == b_id]
+                    for ev in b_events:
+                        time_sec = ev[0] / sfreq
+                        boundary_times.append(time_sec)
+            except Exception:
+                pass # If any error occurs during boundary extraction, we simply skip it and continue.
+
+            # Sort the boundary times to ensure they are in chronological order
+            boundary_times.sort()
+
+            segments_extracted = 0
+            
+            # If there are no discontinuities (boundaries), add the entire file as a single segment
+            if not boundary_times:
+                master_metadata.append({
+                    "Database_Name": "MPILMBB", "Subject_ID": subject_id,
+                    "Gender": demo['gender'], "Age": demo['age'],
+                    "Segment_ID": "seg_01", "Condition": "EC",
+                    "Onset_sec": 0.0, "Duration_sec": round(total_duration_sec, 2),
+                    "Total_Channels": len(raw.ch_names), "Sampling_Rate": sfreq,
+                    "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": "Clean" 
+                })
+                segments_extracted = 1
+            else:
+                # Discontinuity points to divide the data into segments
+                current_onset = 0.0
+                seg_counter = 1
+                
+                for b_time in boundary_times:
+                    seg_duration = b_time - current_onset
+                    
+                    # Control to prevent 0-second fake segments
+                    if seg_duration > 0:
+                        master_metadata.append({
+                            "Database_Name": "MPILMBB", "Subject_ID": subject_id,
+                            "Gender": demo['gender'], "Age": demo['age'],
+                            "Segment_ID": f"seg_{seg_counter:02d}", "Condition": "EC",
+                            "Onset_sec": round(current_onset, 2), "Duration_sec": round(seg_duration, 2),
+                            "Total_Channels": len(raw.ch_names), "Sampling_Rate": sfreq,
+                            "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": "Clean" 
+                        })
+                        seg_counter += 1
+                        segments_extracted += 1
+                    
+                    current_onset = b_time
+                
+                # Add the remaining part of the file from the last discontinuity point to the end
+                if total_duration_sec - current_onset > 0:
+                    master_metadata.append({
+                        "Database_Name": "MPILMBB", "Subject_ID": subject_id,
+                        "Gender": demo['gender'], "Age": demo['age'],
+                        "Segment_ID": f"seg_{seg_counter:02d}", "Condition": "EC",
+                        "Onset_sec": round(current_onset, 2), "Duration_sec": round(total_duration_sec - current_onset, 2),
+                        "Total_Channels": len(raw.ch_names), "Sampling_Rate": sfreq,
+                        "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": "Clean" 
+                    })
+                    segments_extracted += 1
+
             count_mpi += 1
-            print(f"Processed Leipzig: {file_name}")
+            print(f"Processed Leipzig: {file_name} | Extracted {segments_extracted} segment(s)")
+            
         except Exception as e:
             print(f"Error processing Leipzig {file_name}: {e}")
 

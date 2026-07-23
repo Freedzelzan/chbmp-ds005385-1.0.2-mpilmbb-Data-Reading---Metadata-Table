@@ -4,7 +4,9 @@ import os
 import glob
 import warnings
 import plotly.graph_objects as go 
+from pathlib import Path
 
+# hiding MNE and Pandas warnings
 warnings.filterwarnings('ignore')
 
 # ==============================================================================
@@ -31,11 +33,12 @@ master_metadata = []
 SEPARATOR_ROW = {
     "Database_Name": "---", "Subject_ID": "", "Gender": "", "Age": "", 
     "Segment_ID": "", "Condition": "", "Onset_sec": "", "Duration_sec": "", 
-    "Total_Channels": "", "Sampling_Rate": "", "BandPass_Filter": "", "Discontinuity_Status": ""
+    "Total_Channels": "", "Sampling_Rate": "", "BandPass_Filter": "", 
+    "Channel_Names": "", "Discontinuity_Status": ""
 }
 
 # ==============================================================================
-# 2. LOAD DEMOGRAPHICS DATA
+# 2. DEMOGRAPHICS LOADING
 # ==============================================================================
 demo_dict = {'chbmp': {}, 'dortmund': {}, 'mpi': {}}
 
@@ -43,15 +46,19 @@ print("Loading demographic databases...")
 
 if os.path.exists(DEMO_CHBMP):
     try:
-        df_chbmp = pd.read_csv(DEMO_CHBMP, skiprows=1).dropna(axis=1, how='all')
+        df_chbmp = pd.read_csv(DEMO_CHBMP, skiprows=1)
+        df_chbmp = df_chbmp.dropna(axis=1, how='all')
         df_chbmp.columns = [str(c).lower().strip() for c in df_chbmp.columns]
+        
         for _, row in df_chbmp.iterrows():
             raw_id = str(row.get('code', '')).strip().lower()
-            if raw_id and raw_id != 'nan':
-                demo_dict['chbmp'][raw_id.replace('sub-', '')] = {
-                    'age': str(row.get('age', 'N/A')).strip(),
-                    'gender': str(row.get('gender', 'N/A')).strip()
-                }
+            if not raw_id or raw_id == 'nan':
+                continue
+            clean_id = raw_id.replace('sub-', '') 
+            demo_dict['chbmp'][clean_id] = {
+                'age': str(row.get('age', 'N/A')).strip(),
+                'gender': str(row.get('gender', 'N/A')).strip()
+            }
     except Exception as e:
         print(f"Error loading CHBMP demo: {e}")
 
@@ -59,6 +66,7 @@ if os.path.exists(DEMO_DORT):
     try:
         df_dort = pd.read_csv(DEMO_DORT, sep='\t')
         df_dort.columns = [str(c).lower() for c in df_dort.columns]
+        
         for _, row in df_dort.iterrows():
             p_id = str(row.get('participant_id', '')).strip().lower()
             if p_id and p_id != 'nan':
@@ -75,12 +83,17 @@ if os.path.exists(DEMO_MPI):
     try:
         df_mpi = pd.read_csv(DEMO_MPI)
         id_col = next((c for c in df_mpi.columns if 'id' in str(c).lower() or 'sub' in str(c).lower()), 'ID')
+        
         for _, row in df_mpi.iterrows():
             raw_id = str(row.get(id_col, '')).strip().lower()
             if raw_id and raw_id != 'nan':
+                clean_id = raw_id.replace('sub-', '')
                 gender_raw = row.get('Gender_ 1=female_2=male', None)
-                gender_val = 'F' if gender_raw in [1, 1.0, '1', '1.0'] else ('M' if gender_raw in [2, 2.0, '2', '2.0'] else 'N/A')
-                demo_dict['mpi'][raw_id.replace('sub-', '')] = {
+                gender_val = "N/A"
+                if gender_raw in [1, 1.0, '1', '1.0']: gender_val = 'F'
+                elif gender_raw in [2, 2.0, '2', '2.0']: gender_val = 'M'
+                
+                demo_dict['mpi'][clean_id] = {
                     'age': str(row.get('Age', 'N/A')).strip(),
                     'gender': gender_val
                 }
@@ -88,151 +101,164 @@ if os.path.exists(DEMO_MPI):
         print(f"Error loading MPI demo: {e}")
 
 def get_bandpass_str(info):
-    hp, lp = info.get('highpass', 'N/A'), info.get('lowpass', 'N/A')
-    return f"{hp} - {lp} Hz" if hp != 'N/A' and lp != 'N/A' else "N/A"
+    hp = info.get('highpass', 'N/A')
+    lp = info.get('lowpass', 'N/A')
+    if hp != 'N/A' and lp != 'N/A':
+        return f"{hp} - {lp} Hz"
+    return "N/A"
 
 # ==============================================================================
-# 3. PROCESSING CHBMP (CUBAN) DATASET
+# 3. PROCESSING DATABASE 1: CUBAN (CHBMP)
 # ==============================================================================
 print("\n--- Processing CHBMP (Cuban) Database ---")
 if os.path.exists(BASE_DIR_CHBMP):
-    chbmp_edf_files = sorted(glob.glob(os.path.join(BASE_DIR_CHBMP, "**", "*_eeg.edf"), recursive=True))
-    count_chbmp = 0
+    chbmp_raw_dir = os.path.join(BASE_DIR_CHBMP, "raw")
+    if os.path.exists(chbmp_raw_dir):
+        chbmp_subjects = sorted([d for d in os.listdir(chbmp_raw_dir) if os.path.isdir(os.path.join(chbmp_raw_dir, d))])
+        count_chbmp = 0
 
-    for edf_file in chbmp_edf_files:
-        if count_chbmp >= 10:  
-            break
+        for sub_folder in chbmp_subjects:
+            if count_chbmp >= 10:
+                break
 
-        file_name = os.path.basename(edf_file)
-        tsv_file = edf_file.replace("_eeg.edf", "_events.tsv")
-        channels_file = edf_file.replace("_eeg.edf", "_channels.tsv")
+            folder_path = os.path.join(chbmp_raw_dir, sub_folder)
+            edf_files = glob.glob(os.path.join(folder_path, "*.edf"))
+            tsv_files = glob.glob(os.path.join(folder_path, "*events.tsv"))
 
-        if not os.path.exists(tsv_file):
-            continue
-        
-        clean_id = file_name.split('_')[0].lower().replace('sub-', '').strip()
-        demo = demo_dict['chbmp'].get(clean_id)
-        
-        if not demo:
-            print(f" [!] Demographics not found for CHBMP ID: {clean_id}")
-            demo = {'age': 'N/A', 'gender': 'N/A'}
-
-        try:
-            events_df = pd.read_csv(tsv_file, sep='\t')
-            segments = []
-            bad_segments = []
-            
-            current_ec_start = None
-            current_disc_start = None
-            t_end_limit = None
-            
-            for _, row in events_df.iterrows():
-                tt = str(row.get('trial_type', '')).lower().strip()
-                onset = float(row.get('onset', 0))
-
-                if tt in ['eyes closed', 'ojos cerrados']:
-                    if current_disc_start is not None:
-                        bad_segments.append({'onset': current_disc_start, 'duration': onset - current_disc_start})
-                        current_disc_start = None
-                    current_ec_start = onset
-                
-                elif tt == 'discontinuity':
-                    if current_ec_start is not None:
-                        segments.append({'onset': current_ec_start, 'duration': onset - current_ec_start, 'status': 'Clean'})
-                        current_ec_start = None
-                    if current_disc_start is None:
-                        current_disc_start = onset
-                        
-                elif tt in ['eyes opened', 'ojos abiertos']:
-                    if current_ec_start is not None:
-                        segments.append({'onset': current_ec_start, 'duration': onset - current_ec_start, 'status': 'Clean'})
-                        current_ec_start = None
-                    if current_disc_start is not None:
-                        bad_segments.append({'onset': current_disc_start, 'duration': onset - current_disc_start})
-                        current_disc_start = None
-                    t_end_limit = onset
-                    break 
-
-            if not segments:
+            if not edf_files or not tsv_files:
                 continue
+
+            edf_file = edf_files[0]
+            tsv_file = tsv_files[0]
             
-            should_preload = bool(PLOT_MODE)
-            raw = mne.io.read_raw_edf(edf_file, preload=should_preload, verbose=False)
+            display_id = sub_folder.split('_')[0].replace('sub-', '').strip()
+            clean_id = display_id.lower() 
             
-            if os.path.exists(channels_file):
-                ch_df = pd.read_csv(channels_file, sep='\t')
-                emap = {k: v for k, v in zip(raw.ch_names, ch_df.iloc[:, 0].astype(str).tolist())}
-                mne.rename_channels(raw.info, emap, allow_duplicates=False, verbose=False)
+            demo = demo_dict['chbmp'].get(clean_id)
             
-            if PLOT_MODE:
-                ch_names = [ch for ch in raw.ch_names if ch.upper() in ['O1', 'O2']]
-                if ch_names:
-                    t_start = segments[0]['onset']
-                    t_end = t_end_limit if t_end_limit is not None else (segments[-1]['onset'] + segments[-1]['duration'])
-                    
-                    if t_end_limit is None and bad_segments:
-                        t_end = max(t_end, bad_segments[-1]['onset'] + bad_segments[-1]['duration'])
-                        
-                    sfreq = raw.info['sfreq']
-                    idx_start = int(t_start * sfreq)
-                    idx_end = min(int(t_end * sfreq), raw.n_times)
-                    
-                    data = raw.get_data(picks=ch_names, start=idx_start, stop=idx_end)
-                    times = raw.times[idx_start:idx_end]
+            if not demo:
+                print(f" [!] Demographics not found for CHBMP ID: {clean_id}")
+                demo = {'age': 'N/A', 'gender': 'N/A'}
 
-                    fig = go.Figure()
-                    colors = ['black', 'blue']
-                    
-                    for idx, ch_name in enumerate(ch_names):
-                        fig.add_trace(go.Scatter(
-                            x=times, y=data[idx], mode='lines', name=ch_name,
-                            line=dict(color=colors[idx % len(colors)], width=1), opacity=0.8
-                        ))
-
-                    for seg in segments:
-                        fig.add_vrect(x0=seg['onset'], x1=seg['onset'] + seg['duration'], fillcolor="gray", opacity=0.2, layer="below", line_width=0)
-                        
-                    for bseg in bad_segments:
-                        if bseg['duration'] > 0:
-                            fig.add_vrect(x0=bseg['onset'], x1=bseg['onset'] + bseg['duration'], fillcolor="red", opacity=0.3, layer="below", line_width=0)
-                        else:
-                            fig.add_vline(x=bseg['onset'], line_width=2, line_dash="dash", line_color="red")
-
-                    fig.update_layout(
-                        title=f"Eyes Closed EEG Traces: {file_name.split('_')[0]}",
-                        xaxis_title="Time [s]", yaxis_title="Amplitude",
-                        xaxis=dict(range=[t_start, t_end]),
-                        template="plotly_white", hovermode="x unified"
-                    )
-                    
-                    if PLOT_MODE == 'save':
-                        fig.write_html(os.path.join(PLOT_OUTPUT_DIR, f"{file_name.split('_')[0]}_QC.html"), auto_open=False)
-                    elif PLOT_MODE == 'show':
-                        fig.show()
-                else:
-                    print(f" [!] Plotting skipped for {file_name}: O1/O2 channels not found.")
-
-            for i, seg in enumerate(segments):
-                master_metadata.append({
-                    "Database_Name": "CHBMP", "Subject_ID": file_name.split('_')[0],
-                    "Gender": demo['gender'], "Age": demo['age'],
-                    "Segment_ID": f"seg_{i+1:02d}", "Condition": "eyes closed",
-                    "Onset_sec": round(seg['onset'], 2), "Duration_sec": round(seg['duration'], 2),
-                    "Total_Channels": len(raw.ch_names), "Sampling_Rate": raw.info['sfreq'],
-                    "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": seg['status']
-                })
+            try:
+                events_df = pd.read_csv(tsv_file, sep='\t')
+                segments = []
+                ec_active = False
+                start_time = 0.0
+                has_disc = "No"
+                bad_segments_for_plot = [] 
                 
-            count_chbmp += 1
-            action_text = "and saved interactive plot" if PLOT_MODE == 'save' else ""
-            print(f"Processed CHBMP: {file_name.split('_')[0]} | Extracted {len(segments)} segment(s) {action_text}.")
-        except Exception as e:
-            print(f"Error processing CHBMP {file_name}: {e}")
+                for _, row in events_df.iterrows():
+                    tt = str(row.get('trial_type', '')).lower().strip()
+                    onset = float(row.get('onset', 0))
+                    duration = float(row.get('duration', 0))
 
-    if count_chbmp > 0:
-        master_metadata.append(SEPARATOR_ROW)
+                    if tt in ['eyes closed', 'ojos cerrados'] and not ec_active:
+                        ec_active = True
+                        start_time = onset
+                    
+                    elif 'discontinuity' in tt and ec_active:
+                        has_disc = "Yes"
+                        segments.append({
+                            'onset': start_time,
+                            'duration': onset - start_time,
+                            'status': 'Before_Gap' if len(segments) == 0 else 'Between_Gaps'
+                        })
+                        if duration > 0:
+                            bad_segments_for_plot.append({'onset': onset, 'duration': duration})
+                        start_time = onset + duration 
+                        
+                    elif ('opened' in tt or 'abiertos' in tt):
+                        if ec_active:
+                            segments.append({
+                                'onset': start_time,
+                                'duration': onset - start_time,
+                                'status': 'After_Gap' if has_disc == "Yes" else 'Clean'
+                            })
+                            break 
+
+                if not segments:
+                    continue
+
+                should_preload = bool(PLOT_MODE)
+                raw = mne.io.read_raw_edf(edf_file, preload=should_preload, verbose=False)
+                
+                channels_files = glob.glob(os.path.join(folder_path, "*channels.tsv"))
+                if channels_files:
+                    ch_df = pd.read_csv(channels_files[0], sep='\t')
+                    emap = {k: v for k, v in zip(raw.ch_names, ch_df.iloc[:, 0].astype(str).tolist())}
+                    mne.rename_channels(raw.info, emap, allow_duplicates=False, verbose=False)
+
+                ch_names_str = f"[{', '.join(raw.ch_names)}]"
+
+                if PLOT_MODE:
+                    ch_names = [ch for ch in raw.ch_names if ch.upper() in ['O1', 'O2']]
+                    if ch_names:
+                        t_start = segments[0]['onset']
+                        t_end = segments[-1]['onset'] + segments[-1]['duration']
+                        
+                        sfreq = raw.info['sfreq']
+                        idx_start = int(t_start * sfreq)
+                        idx_end = min(int(t_end * sfreq), raw.n_times)
+                        
+                        data = raw.get_data(picks=ch_names, start=idx_start, stop=idx_end)
+                        times = raw.times[idx_start:idx_end]
+
+                        fig = go.Figure()
+                        colors = ['black', 'blue']
+                        
+                        for idx, ch_name in enumerate(ch_names):
+                            fig.add_trace(go.Scatter(
+                                x=times, y=data[idx], mode='lines', name=ch_name,
+                                line=dict(color=colors[idx % len(colors)], width=1), opacity=0.8
+                            ))
+
+                        for seg in segments:
+                            fig.add_vrect(x0=seg['onset'], x1=seg['onset'] + seg['duration'], fillcolor="gray", opacity=0.2, layer="below", line_width=0)
+                            
+                        for bseg in bad_segments_for_plot:
+                            if bseg['duration'] > 0:
+                                fig.add_vrect(x0=bseg['onset'], x1=bseg['onset'] + bseg['duration'], fillcolor="red", opacity=0.3, layer="below", line_width=0)
+                            else:
+                                fig.add_vline(x=bseg['onset'], line_width=2, line_dash="dash", line_color="red")
+
+                        fig.update_layout(
+                            title=f"Eyes Closed EEG Traces: {display_id}",
+                            xaxis_title="Time [s]", yaxis_title="Amplitude",
+                            xaxis=dict(range=[t_start, t_end]),
+                            template="plotly_white", hovermode="x unified"
+                        )
+                        
+                        if PLOT_MODE == 'save':
+                            fig.write_html(os.path.join(PLOT_OUTPUT_DIR, f"{display_id}_QC.html"), auto_open=False)
+                        elif PLOT_MODE == 'show':
+                            fig.show()
+                    else:
+                        print(f" [!] Plotting skipped for {display_id}: O1/O2 channels not found.")
+                
+                for i, seg in enumerate(segments):
+                    master_metadata.append({
+                        "Database_Name": "CHBMP", "Subject_ID": display_id, 
+                        "Gender": demo['gender'], "Age": demo['age'],
+                        "Segment_ID": f"seg_{i+1:02d}", "Condition": "eyes closed",
+                        "Onset_sec": round(seg['onset'], 2), "Duration_sec": round(seg['duration'], 2),
+                        "Total_Channels": len(raw.ch_names), "Sampling_Rate": raw.info['sfreq'],
+                        "BandPass_Filter": get_bandpass_str(raw.info), 
+                        "Channel_Names": ch_names_str,
+                        "Discontinuity_Status": seg['status']
+                    })
+                    
+                count_chbmp += 1
+                action_text = "and saved interactive plot" if PLOT_MODE == 'save' else ""
+                print(f"Processed CHBMP: {display_id} | Extracted {len(segments)} segment(s) {action_text}.")
+            except Exception as e:
+                print(f"Error processing CHBMP {display_id}: {e}")
+
+        if count_chbmp > 0:
+            master_metadata.append(SEPARATOR_ROW)
 
 # ==============================================================================
-# 4. PROCESSING DORTMUND (DS005385) DATASET
+# 4. PROCESSING DATABASE 2: DORTMUND (DS005385)
 # ==============================================================================
 print("\n--- Processing Dortmund (ds005385) Database ---")
 if os.path.exists(BASE_DIR_DORT):
@@ -258,6 +284,8 @@ if os.path.exists(BASE_DIR_DORT):
         try:
             raw = mne.io.read_raw_edf(file_path, preload=False, verbose=False)
             duration_sec = raw.n_times / raw.info['sfreq'] if raw.info['sfreq'] else 0
+            
+            ch_names_str = f"[{', '.join(raw.ch_names)}]"
 
             dort_seg_counter[raw_sub_id] = dort_seg_counter.get(raw_sub_id, 0) + 1
             current_seg_id = f"seg_{dort_seg_counter[raw_sub_id]:02d}"
@@ -267,8 +295,11 @@ if os.path.exists(BASE_DIR_DORT):
                 "Gender": demo['gender'], "Age": demo['age'],
                 "Segment_ID": current_seg_id, "Condition": "eyes closed",
                 "Onset_sec": 0.0, "Duration_sec": round(duration_sec, 2),
-                "Total_Channels": len(raw.ch_names), "Sampling_Rate": raw.info['sfreq'],
-                "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": "Clean" 
+                "Total_Channels": len(raw.ch_names), 
+                "Sampling_Rate": raw.info['sfreq'],
+                "BandPass_Filter": get_bandpass_str(raw.info), 
+                "Channel_Names": ch_names_str,
+                "Discontinuity_Status": "Clean" 
             })
             count_dort += 1
             print(f"Processed Dortmund: {file_name} | Extracted {current_seg_id}")
@@ -279,7 +310,7 @@ if os.path.exists(BASE_DIR_DORT):
         master_metadata.append(SEPARATOR_ROW)
 
 # ==============================================================================
-# 5. PROCESSING LEIPZIG (MPI / LEMON) DATASET
+# 5. PROCESSING DATABASE 3: LEIPZIG (MPI / LEMON)
 # ==============================================================================
 print("\n--- Processing Leipzig (MPILMBB) Database ---")
 if os.path.exists(BASE_DIR_MPI):
@@ -303,14 +334,16 @@ if os.path.exists(BASE_DIR_MPI):
             raw = mne.io.read_raw_eeglab(file_path, preload=False, verbose=False)
             sfreq = raw.info['sfreq']
             total_duration_sec = raw.n_times / sfreq if sfreq else 0
+            
+            ch_names_str = f"[{', '.join(raw.ch_names)}]"
 
             # -------------------------------------------------------------
-            # BOUNDARY (DISCONTINUITY) CHECK
+            # BOUNDARY (KESİNTİ) KONTROLÜ - Çalışan MNE Olay (Event) Mantığı
             # -------------------------------------------------------------
             boundary_times = []
             try:
                 events, event_id = mne.events_from_annotations(raw, verbose=False)
-                # Filter keys that contain 'boundary' (case-insensitive)
+                # 'boundary' içeren etiketleri filtrele
                 boundary_keys = [key for key in event_id.keys() if 'boundary' in key.lower()]
                 
                 for b_key in boundary_keys:
@@ -320,81 +353,86 @@ if os.path.exists(BASE_DIR_MPI):
                         time_sec = ev[0] / sfreq
                         boundary_times.append(time_sec)
             except Exception:
-                pass # If any error occurs during boundary extraction, we simply skip it and continue.
+                pass 
 
-            # Sort the boundary times to ensure they are in chronological order
+            # Zaman damgalarını küçükten büyüğe sırala
             boundary_times.sort()
-
-            segments_extracted = 0
             
-            # If there are no discontinuities (boundaries), add the entire file as a single segment
+            segments_list = []
+
+            # Eğer hiç kesinti (boundary) yoksa, tüm dosyayı tek parça olarak ekle
             if not boundary_times:
-                master_metadata.append({
-                    "Database_Name": "MPILMBB", "Subject_ID": subject_id,
-                    "Gender": demo['gender'], "Age": demo['age'],
-                    "Segment_ID": "seg_01", "Condition": "EC",
-                    "Onset_sec": 0.0, "Duration_sec": round(total_duration_sec, 2),
-                    "Total_Channels": len(raw.ch_names), "Sampling_Rate": sfreq,
-                    "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": "Clean" 
+                segments_list.append({
+                    "onset": 0.0, 
+                    "duration": total_duration_sec
                 })
-                segments_extracted = 1
             else:
-                # Discontinuity points to divide the data into segments
                 current_onset = 0.0
-                seg_counter = 1
-                
                 for b_time in boundary_times:
                     seg_duration = b_time - current_onset
                     
-                    # Control to prevent 0-second fake segments
+                    # 0 saniyelik sahte segmentleri önlemek için kontrol
                     if seg_duration > 0:
-                        master_metadata.append({
-                            "Database_Name": "MPILMBB", "Subject_ID": subject_id,
-                            "Gender": demo['gender'], "Age": demo['age'],
-                            "Segment_ID": f"seg_{seg_counter:02d}", "Condition": "EC",
-                            "Onset_sec": round(current_onset, 2), "Duration_sec": round(seg_duration, 2),
-                            "Total_Channels": len(raw.ch_names), "Sampling_Rate": sfreq,
-                            "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": "Clean" 
+                        segments_list.append({
+                            "onset": current_onset, 
+                            "duration": seg_duration
                         })
-                        seg_counter += 1
-                        segments_extracted += 1
-                    
                     current_onset = b_time
                 
-                # Add the remaining part of the file from the last discontinuity point to the end
+                # Son kesinti noktasından dosyanın sonuna kadar olan kısmı ekle
                 if total_duration_sec - current_onset > 0:
-                    master_metadata.append({
-                        "Database_Name": "MPILMBB", "Subject_ID": subject_id,
-                        "Gender": demo['gender'], "Age": demo['age'],
-                        "Segment_ID": f"seg_{seg_counter:02d}", "Condition": "EC",
-                        "Onset_sec": round(current_onset, 2), "Duration_sec": round(total_duration_sec - current_onset, 2),
-                        "Total_Channels": len(raw.ch_names), "Sampling_Rate": sfreq,
-                        "BandPass_Filter": get_bandpass_str(raw.info), "Discontinuity_Status": "Clean" 
+                    segments_list.append({
+                        "onset": current_onset, 
+                        "duration": total_duration_sec - current_onset
                     })
-                    segments_extracted += 1
+
+            # Toplanan segmentleri status ekleyerek master metadata'ya yaz
+            for i, seg in enumerate(segments_list):
+                if len(segments_list) == 1:
+                    status = "Clean"
+                elif len(segments_list) == 2:
+                    status = "Before_Gap" if i == 0 else "After_Gap"
+                else:
+                    if i == 0: status = "Before_Gap"
+                    elif i == len(segments_list) - 1: status = "After_Gap"
+                    else: status = "Between_Gaps"
+
+                master_metadata.append({
+                    "Database_Name": "MPILMBB", "Subject_ID": subject_id,
+                    "Gender": demo['gender'], "Age": demo['age'],
+                    "Segment_ID": f"seg_{i+1:02d}", "Condition": "EC",
+                    "Onset_sec": round(seg['onset'], 2), "Duration_sec": round(seg['duration'], 2),
+                    "Total_Channels": len(raw.ch_names), 
+                    "Sampling_Rate": sfreq,
+                    "BandPass_Filter": get_bandpass_str(raw.info), 
+                    "Channel_Names": ch_names_str,
+                    "Discontinuity_Status": status
+                })
 
             count_mpi += 1
-            print(f"Processed Leipzig: {file_name} | Extracted {segments_extracted} segment(s)")
+            print(f"Processed Leipzig: {file_name} | Extracted {len(segments_list)} segment(s)")
             
         except Exception as e:
             print(f"Error processing Leipzig {file_name}: {e}")
 
 # ==============================================================================
-# 6. EXPORTING MASTER EXCEL FILE
+# 6. EXPORTING MASTER EXCEL FILE WITH STYLING
 # ==============================================================================
 if master_metadata:
     df = pd.DataFrame(master_metadata)
+
+    # Channel_Names Discontinuity_Status'un hemen öncesinde (sağdan 2.)
     columns_order = [
-        "Database_Name", "Subject_ID", "Gender", "Age", "Segment_ID", 
-        "Condition", "Onset_sec", "Duration_sec", "Total_Channels", 
-        "Sampling_Rate", "BandPass_Filter", "Discontinuity_Status"
+        "Database_Name", "Subject_ID", "Gender", "Age", "Segment_ID",
+        "Condition", "Onset_sec", "Duration_sec", "Total_Channels",
+        "Sampling_Rate", "BandPass_Filter", "Channel_Names", "Discontinuity_Status"
     ]
     df = df[columns_order]
-    
-    def highlight_separator(row):
-        return ['background-color: #0070C0; color: #0070C0'] * len(row) if row['Database_Name'] == '---' else [''] * len(row)
-    
+        
     try:
+        def highlight_separator(row):
+            return ['background-color: #0070C0; color: #0070C0'] * len(row) if row['Database_Name'] == '---' else [''] * len(row)
+        
         styled_df = df.style.apply(highlight_separator, axis=1)
         styled_df.to_excel(OUTPUT_FILE, index=False, engine='openpyxl')
         print("\n" + "="*60)

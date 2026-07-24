@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import glob
 import warnings
+import numpy as np
 import plotly.graph_objects as go 
 from pathlib import Path
 
@@ -20,21 +21,24 @@ DEMO_CHBMP = r"E:\project-healthyageing\02_data\00_download\chbmp\chbmp_Demograp
 DEMO_DORT = r"E:\project-healthyageing\02_data\00_download\ds005385-1.0.2\ds005385_participants.tsv"
 DEMO_MPI = r"E:\project-healthyageing\02_data\00_download\mpilmbb\META_File_IDs_Age_Gender_Education_Drug_Smoke_SKID_LEMON.csv"
 
-OUTPUT_FILE = "Master_Metadata_Summary.xlsx"
+SCRIPT_DIR = Path(__file__).resolve().parent
+OUTPUT_FILE = SCRIPT_DIR / "Master_Metadata_Summary.xlsx"
 
 PLOT_MODE = 'save' 
-PLOT_OUTPUT_DIR = "QC_Plots_CHBMP"
+PLOT_OUTPUT_DIR = SCRIPT_DIR / "QC_Plots_CHBMP"
 
 if PLOT_MODE == 'save' and not os.path.exists(PLOT_OUTPUT_DIR):
     os.makedirs(PLOT_OUTPUT_DIR)
 
 master_metadata = []
 
+# Empty row template for the blue separator. 
+# Discontinuity_Status removed as requested.
 SEPARATOR_ROW = {
     "Database_Name": "---", "Subject_ID": "", "Gender": "", "Age": "", 
     "Segment_ID": "", "Condition": "", "Onset_sec": "", "Duration_sec": "", 
     "Total_Channels": "", "Sampling_Rate": "", "BandPass_Filter": "", 
-    "Channel_Names": "", "Discontinuity_Status": ""
+    "Channel_Names": ""
 }
 
 # ==============================================================================
@@ -107,8 +111,30 @@ def get_bandpass_str(info):
         return f"{hp} - {lp} Hz"
     return "N/A"
 
+
+def should_keep_status_channel(raw, channel_name='Status'):
+    """Return True when a Status channel carries any non-trivial information."""
+    if channel_name not in raw.ch_names:
+        return False
+
+    try:
+        status_idx = raw.ch_names.index(channel_name)
+        sample_count = min(10000, raw.n_times)
+        if sample_count <= 1:
+            return False
+
+        data = raw.get_data(picks=[status_idx], start=0, stop=sample_count)[0]
+        finite_data = data[np.isfinite(data)]
+        if finite_data.size == 0:
+            return False
+
+        unique_vals = np.unique(finite_data)
+        return unique_vals.size > 1
+    except Exception:
+        return False
+
 # ==============================================================================
-# 3. PROCESSING DATABASE CUBAN (CHBMP)
+# 3. PROCESSING DATABASE 1: CUBAN (CHBMP)
 # ==============================================================================
 print("\n--- Processing CHBMP (Cuban) Database ---")
 if os.path.exists(BASE_DIR_CHBMP):
@@ -137,7 +163,6 @@ if os.path.exists(BASE_DIR_CHBMP):
             demo = demo_dict['chbmp'].get(clean_id)
             
             if not demo:
-                print(f" [!] Demographics not found for CHBMP ID: {clean_id}")
                 demo = {'age': 'N/A', 'gender': 'N/A'}
 
             try:
@@ -145,7 +170,6 @@ if os.path.exists(BASE_DIR_CHBMP):
                 segments = []
                 ec_active = False
                 start_time = 0.0
-                has_disc = "No"
                 bad_segments_for_plot = [] 
                 
                 for _, row in events_df.iterrows():
@@ -158,11 +182,9 @@ if os.path.exists(BASE_DIR_CHBMP):
                         start_time = onset
                     
                     elif 'discontinuity' in tt and ec_active:
-                        has_disc = "Yes"
                         segments.append({
                             'onset': start_time,
-                            'duration': onset - start_time,
-                            'status': 'Before_Gap' if len(segments) == 0 else 'Between_Gaps'
+                            'duration': onset - start_time
                         })
                         if duration > 0:
                             bad_segments_for_plot.append({'onset': onset, 'duration': duration})
@@ -172,8 +194,7 @@ if os.path.exists(BASE_DIR_CHBMP):
                         if ec_active:
                             segments.append({
                                 'onset': start_time,
-                                'duration': onset - start_time,
-                                'status': 'After_Gap' if has_disc == "Yes" else 'Clean'
+                                'duration': onset - start_time
                             })
                             break 
 
@@ -231,8 +252,6 @@ if os.path.exists(BASE_DIR_CHBMP):
                         
                         if PLOT_MODE == 'save':
                             fig.write_html(os.path.join(PLOT_OUTPUT_DIR, f"{display_id}_QC.html"), auto_open=False)
-                        elif PLOT_MODE == 'show':
-                            fig.show()
                     else:
                         print(f" [!] Plotting skipped for {display_id}: O1/O2 channels not found.")
                 
@@ -244,13 +263,11 @@ if os.path.exists(BASE_DIR_CHBMP):
                         "Onset_sec": round(seg['onset'], 2), "Duration_sec": round(seg['duration'], 2),
                         "Total_Channels": len(raw.ch_names), "Sampling_Rate": raw.info['sfreq'],
                         "BandPass_Filter": get_bandpass_str(raw.info), 
-                        "Channel_Names": ch_names_str,
-                        "Discontinuity_Status": seg['status']
+                        "Channel_Names": ch_names_str
                     })
                     
                 count_chbmp += 1
-                action_text = "and saved interactive plot" if PLOT_MODE == 'save' else ""
-                print(f"Processed CHBMP: {display_id} | Extracted {len(segments)} segment(s) {action_text}.")
+                print(f"Processed CHBMP: {display_id} | Extracted {len(segments)} segment(s).")
             except Exception as e:
                 print(f"Error processing CHBMP {display_id}: {e}")
 
@@ -258,51 +275,115 @@ if os.path.exists(BASE_DIR_CHBMP):
             master_metadata.append(SEPARATOR_ROW)
 
 # ==============================================================================
-# 4. PROCESSING DATABASE DORTMUND (DS005385)
+# 4. PROCESSING DATABASE 2: DORTMUND (DS005385)
 # ==============================================================================
 print("\n--- Processing Dortmund (ds005385) Database ---")
 if os.path.exists(BASE_DIR_DORT):
-    dort_files = sorted(glob.glob(os.path.join(BASE_DIR_DORT, "**", "*EyesClosed*.edf"), recursive=True))
+    # Only process "acq-pre" files
+    dort_files = sorted(glob.glob(os.path.join(BASE_DIR_DORT, "**", "*task-EyesClosed_acq-pre_eeg.edf"), recursive=True))
     count_dort = 0
-    dort_seg_counter = {}
 
     for file_path in dort_files:
         if count_dort >= 10:
             break
             
         file_name = os.path.basename(file_path)
-        raw_sub_id = file_name.split('_')[0]
-        sub_id = raw_sub_id.lower()
-        if not sub_id.startswith('sub-'):
-            sub_id = f"sub-{sub_id}"
+        
+        # Parse Subject ID and Session
+        # Example filename: sub-001_ses-1_task-EyesClosed_acq-pre_eeg.edf
+        parts = file_name.split('_')
+        raw_sub_id = parts[0]
+        session_id = parts[1] if len(parts) > 1 and parts[1].startswith('ses-') else 'ses-1'
+        
+        sub_id_lookup = raw_sub_id.lower()
+        if not sub_id_lookup.startswith('sub-'):
+            sub_id_lookup = f"sub-{sub_id_lookup}"
             
-        demo = demo_dict['dortmund'].get(sub_id)
+        demo = demo_dict['dortmund'].get(sub_id_lookup)
         if not demo:
-            print(f" [!] Demographics not found for Dortmund ID: {sub_id}")
             demo = {'age': 'N/A', 'gender': 'N/A'}
+            
+        # Format Subject ID as requested: Sub-001.Ses-001.Pre
+        sub_num = raw_sub_id.replace('sub-', '')
+        ses_num = session_id.replace('ses-', '').zfill(3)
+        formatted_id = f"Sub-{sub_num}.Ses-{ses_num}.Pre"
 
         try:
+            # Read EEG Data
             raw = mne.io.read_raw_edf(file_path, preload=False, verbose=False)
-            duration_sec = raw.n_times / raw.info['sfreq'] if raw.info['sfreq'] else 0
+            sfreq = raw.info['sfreq']
+            total_duration_sec = raw.n_times / sfreq if sfreq else 0
             
-            ch_names_str = f"[{', '.join(raw.ch_names)}]"
+            # Keep the Status channel only if it carries non-trivial information.
+            ch_names_clean = raw.ch_names.copy()
+            if "Status" in ch_names_clean and not should_keep_status_channel(raw, "Status"):
+                ch_names_clean.remove("Status")
+                
+            total_channels = len(ch_names_clean)
+            ch_names_str = f"[{', '.join(ch_names_clean)}]"
 
-            dort_seg_counter[raw_sub_id] = dort_seg_counter.get(raw_sub_id, 0) + 1
-            current_seg_id = f"seg_{dort_seg_counter[raw_sub_id]:02d}"
+            # Check for Discontinuities
+            segments_list = []
+            
+            # 1. First, check MNE annotations
+            boundary_times = []
+            try:
+                events, event_id = mne.events_from_annotations(raw, verbose=False)
+                boundary_keys = [key for key in event_id.keys() if 'boundary' in key.lower() or 'bad' in key.lower() or 'discontinuity' in key.lower()]
+                
+                for b_key in boundary_keys:
+                    b_id = event_id[b_key]
+                    b_events = events[events[:, 2] == b_id]
+                    for ev in b_events:
+                        time_sec = ev[0] / sfreq
+                        boundary_times.append(time_sec)
+            except Exception:
+                pass 
+            
+            # 2. Also check external TSV file if annotations were empty
+            if not boundary_times:
+                tsv_file = file_path.replace("_eeg.edf", "_events.tsv")
+                if os.path.exists(tsv_file):
+                    try:
+                        events_df = pd.read_csv(tsv_file, sep='\t')
+                        for _, row in events_df.iterrows():
+                            tt = str(row.get('type', row.get('trial_type', ''))).lower()
+                            if 'boundary' in tt or 'discontinuity' in tt:
+                                boundary_times.append(float(row.get('onset', 0)))
+                    except Exception:
+                        pass
+            
+            boundary_times.sort()
 
-            master_metadata.append({
-                "Database_Name": "Dortmund", "Subject_ID": raw_sub_id,
-                "Gender": demo['gender'], "Age": demo['age'],
-                "Segment_ID": current_seg_id, "Condition": "eyes closed",
-                "Onset_sec": 0.0, "Duration_sec": round(duration_sec, 2),
-                "Total_Channels": len(raw.ch_names), 
-                "Sampling_Rate": raw.info['sfreq'],
-                "BandPass_Filter": get_bandpass_str(raw.info), 
-                "Channel_Names": ch_names_str,
-                "Discontinuity_Status": "Clean" 
-            })
+            # Split into segments
+            if not boundary_times:
+                segments_list.append({"onset": 0.0, "duration": total_duration_sec})
+            else:
+                current_onset = 0.0
+                for b_time in boundary_times:
+                    seg_duration = b_time - current_onset
+                    if seg_duration > 0:
+                        segments_list.append({"onset": current_onset, "duration": seg_duration})
+                    current_onset = b_time
+                
+                if total_duration_sec - current_onset > 0:
+                    segments_list.append({"onset": current_onset, "duration": total_duration_sec - current_onset})
+
+            # Append to master table
+            for i, seg in enumerate(segments_list):
+                master_metadata.append({
+                    "Database_Name": "Dortmund", "Subject_ID": formatted_id,
+                    "Gender": demo['gender'], "Age": demo['age'],
+                    "Segment_ID": f"seg_{i+1:02d}", "Condition": "eyes closed",
+                    "Onset_sec": round(seg['onset'], 2), "Duration_sec": round(seg['duration'], 2),
+                    "Total_Channels": total_channels, 
+                    "Sampling_Rate": sfreq,
+                    "BandPass_Filter": get_bandpass_str(raw.info), 
+                    "Channel_Names": ch_names_str
+                })
+
             count_dort += 1
-            print(f"Processed Dortmund: {file_name} | Extracted {current_seg_id}")
+            print(f"Processed Dortmund: {file_name} | Extracted {len(segments_list)} segment(s)")
         except Exception as e:
             print(f"Error processing Dortmund {file_name}: {e}")
 
@@ -310,7 +391,7 @@ if os.path.exists(BASE_DIR_DORT):
         master_metadata.append(SEPARATOR_ROW)
 
 # ==============================================================================
-# 5. PROCESSING DATABASE LEIPZIG (MPI / LEMON)
+# 5. PROCESSING DATABASE 3: LEIPZIG (MPI / LEMON)
 # ==============================================================================
 print("\n--- Processing Leipzig (MPILMBB) Database ---")
 if os.path.exists(BASE_DIR_MPI):
@@ -327,7 +408,6 @@ if os.path.exists(BASE_DIR_MPI):
         
         demo = demo_dict['mpi'].get(clean_id)
         if not demo:
-            print(f" [!] Demographics not found for Leipzig ID: {clean_id}")
             demo = {'age': 'N/A', 'gender': 'N/A'}
 
         try:
@@ -338,12 +418,12 @@ if os.path.exists(BASE_DIR_MPI):
             ch_names_str = f"[{', '.join(raw.ch_names)}]"
 
             # -------------------------------------------------------------
-            # Boundary (discontinuity) events detection
+            # BOUNDARY (KESİNTİ) KONTROLÜ
             # -------------------------------------------------------------
             boundary_times = []
             try:
                 events, event_id = mne.events_from_annotations(raw, verbose=False)
-                # filter event_id keys to find those related to boundaries
+                # 'boundary' içeren etiketleri filtrele
                 boundary_keys = [key for key in event_id.keys() if 'boundary' in key.lower()]
                 
                 for b_key in boundary_keys:
@@ -353,14 +433,14 @@ if os.path.exists(BASE_DIR_MPI):
                         time_sec = ev[0] / sfreq
                         boundary_times.append(time_sec)
             except Exception:
-                pass 
+                pass # Eğer anotasyon yoksa hata vermeden geç
 
-            # sort the boundary times to ensure they are in chronological order
+            # Zaman damgalarını küçükten büyüğe sırala
             boundary_times.sort()
             
             segments_list = []
 
-            # Add segments based on boundary times
+            # Eğer hiç kesinti (boundary) yoksa, tüm dosyayı tek parça olarak ekle
             if not boundary_times:
                 segments_list.append({
                     "onset": 0.0, 
@@ -371,7 +451,7 @@ if os.path.exists(BASE_DIR_MPI):
                 for b_time in boundary_times:
                     seg_duration = b_time - current_onset
                     
-                    # Only add segments with positive duration
+                    # 0 saniyelik sahte segmentleri önlemek için kontrol
                     if seg_duration > 0:
                         segments_list.append({
                             "onset": current_onset, 
@@ -379,24 +459,14 @@ if os.path.exists(BASE_DIR_MPI):
                         })
                     current_onset = b_time
                 
-                # Add the final segment after the last boundary if it exists
+                # Son kesinti noktasından dosyanın sonuna kadar olan kısmı ekle
                 if total_duration_sec - current_onset > 0:
                     segments_list.append({
                         "onset": current_onset, 
                         "duration": total_duration_sec - current_onset
                     })
 
-            # write the segments to master metadata with appropriate status
             for i, seg in enumerate(segments_list):
-                if len(segments_list) == 1:
-                    status = "Clean"
-                elif len(segments_list) == 2:
-                    status = "Before_Gap" if i == 0 else "After_Gap"
-                else:
-                    if i == 0: status = "Before_Gap"
-                    elif i == len(segments_list) - 1: status = "After_Gap"
-                    else: status = "Between_Gaps"
-
                 master_metadata.append({
                     "Database_Name": "MPILMBB", "Subject_ID": subject_id,
                     "Gender": demo['gender'], "Age": demo['age'],
@@ -405,8 +475,7 @@ if os.path.exists(BASE_DIR_MPI):
                     "Total_Channels": len(raw.ch_names), 
                     "Sampling_Rate": sfreq,
                     "BandPass_Filter": get_bandpass_str(raw.info), 
-                    "Channel_Names": ch_names_str,
-                    "Discontinuity_Status": status
+                    "Channel_Names": ch_names_str
                 })
 
             count_mpi += 1
@@ -421,10 +490,11 @@ if os.path.exists(BASE_DIR_MPI):
 if master_metadata:
     df = pd.DataFrame(master_metadata)
 
+    # Discontinuity_Status removed from column order
     columns_order = [
         "Database_Name", "Subject_ID", "Gender", "Age", "Segment_ID",
         "Condition", "Onset_sec", "Duration_sec", "Total_Channels",
-        "Sampling_Rate", "BandPass_Filter", "Channel_Names", "Discontinuity_Status"
+        "Sampling_Rate", "BandPass_Filter", "Channel_Names"
     ]
     df = df[columns_order]
         
@@ -435,7 +505,7 @@ if master_metadata:
         styled_df = df.style.apply(highlight_separator, axis=1)
         styled_df.to_excel(OUTPUT_FILE, index=False, engine='openpyxl')
         print("\n" + "="*60)
-        print(f"SUCCESS! Master Metadata extracted to: {os.path.abspath(OUTPUT_FILE)}")
+        print(f"SUCCESS! Master Metadata extracted to: {OUTPUT_FILE}")
         print("="*60 + "\n")
     except Exception as e:
         print(f"\nStyling export failed. Saving raw format: {e}")

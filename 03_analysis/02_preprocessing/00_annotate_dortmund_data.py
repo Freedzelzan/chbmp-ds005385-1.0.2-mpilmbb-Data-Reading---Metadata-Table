@@ -30,5 +30,7 @@ raw = mne.io.read_raw_edf(edf_files[0], preload=True)
 raw.plot()
 
 ## 3. Fred + Gesine will annotate the data in the interactive window
+
 ## 4. save the annotations in a .csv file
+
 ## open next file and repeat the process until all files are annotated

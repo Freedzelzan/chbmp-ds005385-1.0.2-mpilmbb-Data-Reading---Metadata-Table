@@ -2,6 +2,8 @@
 uv.lock
 *.egg-info
 
+00_info
+01_methods
 02_data
 04_results
 

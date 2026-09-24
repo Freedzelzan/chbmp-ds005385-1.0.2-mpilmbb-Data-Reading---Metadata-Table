@@ -69,7 +69,9 @@ for file_path in edf_files:
     # every recording gets its own unambiguous CSV output file.
     file_name = os.path.splitext(os.path.basename(file_path))[0]
     annotation_file = os.path.join(output_dir, f"{file_name}_annotations.csv")
-    raw.annotations.to_data_frame(index=False).to_csv(annotation_file, index=False)
+    # MNE's to_data_frame() does not accept index=False; that option belongs to
+    # pandas' to_csv() method below.
+    raw.annotations.to_data_frame().to_csv(annotation_file, index=False)
     print(f"Annotations saved to: {annotation_file}")
 
 ## 3. Fred + Gesine will annotate the data in the interactive window

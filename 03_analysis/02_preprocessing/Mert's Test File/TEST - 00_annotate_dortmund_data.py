@@ -21,7 +21,13 @@ from src.config import DIR_DATA, BASE_DIR_CHBMP, BASE_DIR_DORT, BASE_DIR_MPI
 # This overrides the imported project default only for this local test script.
 BASE_DIR_DORT = r"E:\project-healthyageing\02_data\00_download\ds005385-1.0.2"
 ## Define the output directory for the csv files with annotations
-output_dir = os.path.join(DIR_DATA.joinpath('01_prepdata').joinpath('00_dortmund_annotations_artifacts'))
+# Save test results on the current user's Desktop instead of the project data
+# folder, making the generated annotation CSV files easy to find locally.
+output_dir = os.path.join(
+    os.path.expanduser("~"),
+    "Desktop",
+    "00_dortmund_annotations_artifacts",
+)
 # Build the folder where annotation CSV files are intended
 # to be written. Creating it now means later save operations can use it safely.
 if not os.path.exists(output_dir):
@@ -72,7 +78,9 @@ for file_path in edf_files:
     # every recording gets its own unambiguous CSV output file.
     file_name = os.path.splitext(os.path.basename(file_path))[0]
     annotation_file = os.path.join(output_dir, f"{file_name}_annotations.csv")
-    raw.annotations.to_data_frame(index=False).to_csv(annotation_file, index=False)
+    # MNE's to_data_frame() does not accept index=False; that option belongs to
+    # pandas' to_csv() method below.
+    raw.annotations.to_data_frame().to_csv(annotation_file, index=False)
     print(f"Annotations saved to: {annotation_file}")
 
 ## 3. Fred + Gesine will annotate the data in the interactive window

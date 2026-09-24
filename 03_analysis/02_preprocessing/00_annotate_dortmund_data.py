@@ -2,6 +2,7 @@ import mne
 import pandas as pd
 import os
 import glob
+import re
 import warnings
 import matplotlib
 
@@ -36,6 +37,39 @@ edf_files = sorted(glob.glob(search_pattern, recursive=True))
 # Sorting makes the processing order deterministic, so the
 # first file selected below is predictable between runs.
 print(f"\nFound {len(edf_files)} EDF files.")
+
+# Ask where the previous annotation session ended so the script can resume
+# with the next subject instead of opening all recordings from the beginning.
+while True:
+    try:
+        last_checked_subject = int(
+            input("What is the subject number of the last file you checked? ")
+        )
+        if last_checked_subject < 0:
+            raise ValueError
+        break
+    except ValueError:
+        print("Please enter a non-negative whole number.")
+
+
+def get_subject_number(file_path):
+    match = re.search(r"[\\/]sub-(\d+)(?:[\\/]|$)", file_path)
+    return int(match.group(1)) if match else None
+
+
+# Keep only subjects after the number entered above. For example, entering 39
+# starts the workflow at sub-040, including all matching sessions/acquisitions.
+edf_files = [
+    file_path
+    for file_path in edf_files
+    if (subject_number := get_subject_number(file_path)) is not None
+    and subject_number > last_checked_subject
+]
+selected_subjects = sorted(
+    {get_subject_number(file_path) for file_path in edf_files}
+)
+print(f"Starting with subjects after sub-{last_checked_subject:03d}: ")
+print(", ".join(f"sub-{subject:03d}" for subject in selected_subjects))
 
 # Stop with a useful message instead of failing later at edf_files[0] when the
 # data folder is missing or contains no matching EyesClosed recordings.

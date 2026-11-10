@@ -1,5 +1,11 @@
 {
     "python.analysis.extraPaths": [
         "./src"
-    ]
+    ],
+    "chat.tools.terminal.autoApprove": {
+        "/^& \"\\$env:APPDATA\\\\uv\\\\python\\\\cpython-3\\.12\\.13-windows-x86_64-none\\\\python\\.exe\" --version$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
 }

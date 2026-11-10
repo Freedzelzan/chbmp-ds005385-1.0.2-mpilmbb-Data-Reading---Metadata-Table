@@ -1,0 +1,247 @@
+"""
+02_Preprocessing.py - EEG preprocessing for microstate analysis
+================================================================
+
+Dataset : Dortmund (ds005385), eyes-closed resting state (acq-pre and acq-post)
+Input   : the raw EDF recordings
+Output  : one preprocessed .fif file per recording (the full, continuous
+          recording). The bad segments marked in the annotation CSV files
+          (00_annotate_dortmund_data.py) are removed in a separate script.
+
+
+BACKGROUND: WHAT ARE EEG MICROSTATES?
+-------------------------------------
+At every time point, the voltages of all electrodes together form a "map" of
+the electric field on the scalp (a topography). In resting-state EEG this map
+does not change smoothly: it stays almost the same for roughly 60-120 ms and
+then quickly switches to a different map. These short, stable periods are
+called microstates. Most of the EEG can be described by only 4-7 typical maps,
+which are usually named A, B, C, D, ...
+
+The microstate analysis itself (the next script) will:
+    1. find the time points where the signal is strongest, i.e. the peaks of
+       the Global Field Power (GFP = standard deviation across all electrodes
+       at one time point),
+    2. group the maps at these peaks into K typical maps with the modified
+       k-means algorithm (pycrostates.cluster.ModKMeans),
+    3. label every time point of the EEG with its most similar typical map
+       ("backfitting") and compute metrics such as the mean duration,
+       occurrence and coverage of every microstate.
+
+
+WHAT IS PREPROCESSING AND WHY DO WE NEED IT?
+--------------------------------------------
+A raw EEG recording also contains signals that do not come from the brain:
+slow drifts (sweat, electrode drift), muscle activity, power line noise
+(50 Hz), and movement or eye artifacts. Preprocessing removes or reduces these
+signals, so that the microstate maps describe brain activity and not noise.
+This script performs the following steps for every recording:
+
+    STEP 1  Load the raw EDF file
+    STEP 2  Remove the non-EEG 'Status' channel
+    STEP 3  Attach the electrode positions (montage)
+    STEP 4  Band-pass filter from 1 to 30 Hz
+    STEP 5  Downsample from 1000 Hz to 250 Hz
+    STEP 6  Re-reference to the common average
+    STEP 7  Save the preprocessed recording as .fif
+
+The recording is not cut here. Filtering, resampling and re-referencing do
+not shift the time axis, so the onsets in the annotation CSV files (seconds
+from the start of the recording) still match the saved .fif files.
+
+
+NOT DONE YET: BAD CHANNELS
+--------------------------
+The annotation CSV files only mark bad time segments, not bad channels. In a
+test on four recordings, single noisy channels (4-7 times the median
+amplitude) produced microstate maps with a "hot spot" on one electrode only.
+The average reference (STEP 6) also spreads the noise of a bad channel to all
+other channels. Possible next steps: mark bad channels by hand and
+interpolate them (raw.interpolate_bads(), which uses the montage of STEP 3),
+ICA (removes eye and muscle activity), or pycrostates' apply_spatial_filter.
+
+
+SOURCES
+-------
+Steps 2-6 follow the preprocessing used in the two resources for this task:
+    - pycrostates tutorials (keep only EEG channels, then apply the average
+      reference before any microstate computation):
+      https://pycrostates.readthedocs.io/en/latest/generated/auto_tutorials/
+    - Frederic von Wegner's microstate tutorial (set_montage("standard_1005"),
+      pick("eeg"), filter(1, 30), set_eeg_reference("average")):
+      https://github.com/Frederic-vW/microstates_tutorial/tree/main/python
+"""
+
+import mne
+import os
+import glob
+import warnings
+
+# Suppress warning messages from MNE and pandas so the processing output stays
+# focused on the status messages printed below.
+warnings.filterwarnings('ignore')
+
+from src.config import BASE_DIR_DORT, DIR_PREPDATA
+
+
+# ---------------------------------------------------------------------------
+# PARAMETERS
+# ---------------------------------------------------------------------------
+
+# Band-pass filter edges in Hz. Activity below 1 Hz is mostly slow drift
+# (sweating, electrode drift) and activity above 30 Hz is mostly muscle
+# activity and line noise. Eyes-closed resting EEG is dominated by the alpha
+# rhythm (8-12 Hz), which lies well inside this band. 1-30 Hz is the band used
+# in Frederic von Wegner's tutorial and planned in 01_unify_eeg_format.py.
+# Note: TEST - Removing_Bad_Markings.py uses 0.5-40 Hz for general cleaning;
+# that band is not used here.
+L_FREQ = 1.0
+H_FREQ = 30.0
+
+# New sampling rate in Hz. The Dortmund data are recorded at 1000 Hz (one
+# sample every 1 ms). Microstates last about 60-120 ms, so 250 Hz (one sample
+# every 4 ms) is still precise enough, while the files become four times
+# smaller and the clustering four times faster. 250 Hz can represent
+# frequencies up to 125 Hz (the Nyquist frequency = half the sampling rate),
+# far above the 30 Hz that remain after filtering, so no information is lost.
+# All recordings must have the same sampling rate, because some pycrostates
+# settings (for example the smoothing window of the backfitting) are given in
+# samples, not in seconds.
+TARGET_SFREQ = 250.0
+
+# Name of the standard electrode layout. MNE uses it to look up the 3D position
+# of every electrode name (e.g. 'Fz', 'Cz'). All 64 Dortmund channel names
+# exist in this layout.
+MONTAGE_NAME = "standard_1005"
+
+
+# ---------------------------------------------------------------------------
+# PATHS
+# ---------------------------------------------------------------------------
+
+# Local setting for Mert's computer (the same path as in the TEST scripts):
+# the raw data are on the external E: drive. Comment out this line to use the
+# project default.
+BASE_DIR_DORT = r"E:\project-healthyageing\02_data\00_download\ds005385-1.0.2"
+
+# Output folder inside 02_data/01_prepdata. Its name lists the settings used,
+# so that files made with different settings are never mixed up.
+output_dir = DIR_PREPDATA / (
+    f"02_microstate_prep_{L_FREQ:g}-{H_FREQ:g}Hz_"
+    f"{TARGET_SFREQ:g}Hz_avgref_fif"
+)
+output_dir.mkdir(parents=True, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# FIND THE RECORDINGS
+# ---------------------------------------------------------------------------
+
+# Search recursively for pre- and post-acquisition EyesClosed EDF files under
+# each subject's EEG folder.
+search_pattern = os.path.join(
+    BASE_DIR_DORT,
+    "sub-*",
+    "**",
+    "eeg",
+    "*task-EyesClosed_acq-*_eeg.edf",
+)
+edf_files = sorted(glob.glob(search_pattern, recursive=True))
+
+print(f"\nFound {len(edf_files)} EDF files.")
+
+# Stop with a useful message when the data folder is missing or empty.
+if not edf_files:
+    raise FileNotFoundError(
+        f"No EyesClosed EDF files were found below: {BASE_DIR_DORT}"
+    )
+
+saved_file_count = 0
+
+
+# ---------------------------------------------------------------------------
+# PROCESS EVERY RECORDING
+# ---------------------------------------------------------------------------
+
+for file_path in edf_files:
+    file_name = os.path.splitext(os.path.basename(file_path))[0]
+
+    print(f"\nProcessing: {file_name}")
+
+    # ------------------------------------------------------------------
+    # STEP 1: Load the raw EDF file
+    # ------------------------------------------------------------------
+    # preload=True reads the EEG samples into memory. This is required for
+    # filtering, resampling and re-referencing, which change the data.
+    raw = mne.io.read_raw_edf(file_path, preload=True, verbose=False)
+
+    # ------------------------------------------------------------------
+    # STEP 2: Remove the non-EEG 'Status' channel
+    # ------------------------------------------------------------------
+    # 'Status' stores trigger codes of the recording system, not brain
+    # signals (see Dortmund_Status_Test.py). It must not be part of the
+    # microstate maps, so only the 64 EEG channels are kept.
+    if 'Status' in raw.ch_names:
+        raw.drop_channels(['Status'])
+        print("  -> Dropped 'Status' channel.")
+
+    # ------------------------------------------------------------------
+    # STEP 3: Attach the electrode positions (montage)
+    # ------------------------------------------------------------------
+    # The EDF file only stores channel names, not where the electrodes sit
+    # on the head. Microstates are maps, so we need the positions to plot
+    # the maps as topographies and for any later spatial step (for example
+    # interpolating a broken channel). MNE stops with an error here if a
+    # channel name is not in the standard layout.
+    raw.set_montage(MONTAGE_NAME, verbose=False)
+    print(f"  -> Set montage '{MONTAGE_NAME}'.")
+
+    # ------------------------------------------------------------------
+    # STEP 4: Band-pass filter (1-30 Hz)
+    # ------------------------------------------------------------------
+    # Filtering removes the slow drifts and the fast muscle and line noise
+    # (see L_FREQ and H_FREQ above). The whole continuous recording is
+    # filtered before it is cut into clean intervals, because a filter
+    # creates distortions at the start and end of the data ("edge effects").
+    # This way the edge effects occur only at the start and end of the
+    # whole recording, not at both ends of every saved interval.
+    raw.filter(l_freq=L_FREQ, h_freq=H_FREQ, fir_design='firwin', verbose=False)
+    print(f"  -> Applied {L_FREQ:g} - {H_FREQ:g} Hz band-pass filter.")
+
+    # ------------------------------------------------------------------
+    # STEP 5: Downsample (1000 Hz -> 250 Hz)
+    # ------------------------------------------------------------------
+    # Downsampling must come after the low-pass filter: frequencies above
+    # the new Nyquist frequency (125 Hz) would otherwise fold back into the
+    # data as fake low frequencies ("aliasing"). MNE's resample() also
+    # applies its own anti-aliasing filter as an extra safety step.
+    original_sfreq = raw.info['sfreq']
+    raw.resample(TARGET_SFREQ, verbose=False)
+    print(f"  -> Resampled from {original_sfreq:g} Hz to {TARGET_SFREQ:g} Hz.")
+
+    # ------------------------------------------------------------------
+    # STEP 6: Re-reference to the common average
+    # ------------------------------------------------------------------
+    # EEG measures voltage differences between each electrode and a
+    # reference electrode, so the maps depend on where the reference is.
+    # With the average reference, the mean of all electrodes is subtracted
+    # at every time point, so the map no longer depends on one reference
+    # electrode. Microstate analysis expects average-referenced data: GFP
+    # is defined as the spatial standard deviation of an average-referenced
+    # map. Both tutorials apply this step right before the analysis.
+    raw.set_eeg_reference('average', verbose=False)
+    print("  -> Applied common average reference.")
+
+    # ------------------------------------------------------------------
+    # STEP 7: Save the preprocessed recording
+    # ------------------------------------------------------------------
+    # The full recording is saved without cutting. The marked bad segments
+    # are removed later in a separate script; the time axis still starts at
+    # 0 s and meas_date is kept, so the CSV onsets match this file.
+    output_file = os.path.join(output_dir, f"{file_name}.fif")
+    raw.save(output_file, overwrite=True, verbose=False)
+    print(f"  -> Saved to: {output_file}")
+    saved_file_count += 1
+
+print(f"\nSaved files: {saved_file_count}")
+print(f"Output folder: {output_dir}")

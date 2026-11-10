@@ -79,7 +79,8 @@ for file_path in edf_files:
                         f"Cannot convert timestamp onset because the recording "
                         f"start time is unavailable: {file_path}"
                     )
-
+                # Convert both timestamps to UTC and remove timezone information for
+                # accurate subtraction.
                 recording_start = pd.Timestamp(recording_start)
                 if annotation_onset.tz is not None:
                     annotation_onset = annotation_onset.tz_convert(
@@ -93,6 +94,7 @@ for file_path in edf_files:
             else:
                 onset = float(onset_value)
 
+            # Convert the duration value to a float and store the bad segment as a tuple.
             duration = float(row['duration'])
             bad_segments.append((onset, duration))
         bad_segments.sort(key=lambda segment: segment[0])
@@ -102,6 +104,7 @@ for file_path in edf_files:
     segment_counter = 1
     segment_saved = False
 
+    # Iterate through the bad segments and save the clean intervals between them.
     for onset, duration in bad_segments:
         # The interval before this bad segment is clean when its onset is after
         # the end of the previously processed bad segment.
